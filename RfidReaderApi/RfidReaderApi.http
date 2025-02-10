@@ -1,0 +1,6 @@
+@RfidReaderApi_HostAddress = http://localhost:5258
+
+GET {{RfidReaderApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
