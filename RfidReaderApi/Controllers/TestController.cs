@@ -68,7 +68,6 @@ public class TestController : ControllerBase
         }
     }
 
-
     [HttpPost("test-association")]
     public async Task<IActionResult> TestAssociation([FromBody] TestAssociationRequest request)
     {
@@ -94,10 +93,13 @@ public class TestController : ControllerBase
                 return NotFound(new { error = $"No se encontró información para el operador con EPC: {request.OperatorEpc}" });
             }
 
+            // Actualizar estado del EPC de la tarima a 2
+            await _productDataService.UpdateStatusAsync(request.PalletEpc, 2);
+
             // Retornar ambos datos
             return Ok(new
             {
-                status = "Datos obtenidos exitosamente.",
+                status = "Datos obtenidos y estado actualizado exitosamente.",
                 product = productData,
                 operatorData = operatorData // Renombrado para evitar conflictos
             });
@@ -144,7 +146,10 @@ public class TestController : ControllerBase
                     Success = true
                 });
 
-                return Ok(new { status = "Tarima enviada sin operador." });
+                // Actualizar estado del EPC de la tarima a 2
+                await _productDataService.UpdateStatusAsync(request.PalletEpc, 2);
+
+                return Ok(new { status = "Tarima enviada sin operador y estado actualizado." });
             }
 
             // Obtener información del operador si existe
@@ -165,17 +170,14 @@ public class TestController : ControllerBase
                 Success = true
             });
 
-            return Ok(new { status = "Asociación enviada exitosamente." });
+            // Actualizar estado del EPC de la tarima a 2
+            await _productDataService.UpdateStatusAsync(request.PalletEpc, 2);
+
+            return Ok(new { status = "Asociación enviada y estado actualizado exitosamente." });
         }
         catch (Exception ex)
         {
             return StatusCode(500, new { error = ex.Message });
         }
     }
-
-
-
-
-
-
 }
