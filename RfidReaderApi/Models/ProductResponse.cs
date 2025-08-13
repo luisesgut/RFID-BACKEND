@@ -27,5 +27,8 @@ namespace RfidReaderApi.Models
 
 
         public string Rfid { get; set; }
+
+        [JsonPropertyName("tipoProducto")]
+        public string? TipoProducto { get; set; }
     }
 }

@@ -50,7 +50,8 @@ namespace RfidReaderApi.Services
                     PesoTarima = data.PesoTarima ?? "N/A",
                     FechaEntrada = DateTime.Now,
                     HoraEntrada = DateTime.Now.TimeOfDay,
-                    Rfid = data.Rfid ?? epc
+                    Rfid = data.Rfid ?? epc,
+                    TipoProducto = data.TipoProducto ?? "N/A"
                 };
             }
             catch (Exception ex)

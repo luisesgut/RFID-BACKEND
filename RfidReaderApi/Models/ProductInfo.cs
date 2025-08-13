@@ -20,6 +20,7 @@
         public DateTime? FechaEntrada { get; set; }
         public TimeSpan? HoraEntrada { get; set; }
         public string Rfid { get; set; }
+        public string TipoProducto { get; set; } = "N/A";
     }
 
     // Models/OperatorInfo.cs

@@ -1,5 +1,6 @@
 ﻿using Impinj.OctaneSdk;
 using Microsoft.AspNetCore.SignalR;
+using RfidReaderApi.Models;
 using RfidReaderApi.Services;
 using RFIDReaderAPI.Hubs;
 using System.Collections.Concurrent;
@@ -16,7 +17,7 @@ namespace RFIDReaderAPI.Services
         private readonly ConcurrentDictionary<string, PalletInfo> pendingPallets;
         private readonly ConcurrentDictionary<string, string> palletOperatorAssociations;
         private const string READER_IP = "172.16.100.198";
-        private const int ASSOCIATION_TIMEOUT_SECONDS = 3   ;
+        private const int ASSOCIATION_TIMEOUT_SECONDS = 1;
         private const int RECONNECTION_ATTEMPT_DELAY_MS = 5000; // 5 segundos entre intentos
         private const int MAX_RECONNECTION_ATTEMPTS = 5;
         private Settings lastKnownSettings;
@@ -40,6 +41,7 @@ namespace RFIDReaderAPI.Services
             public double Rssi { get; set; }
             public ushort AntennaPort { get; set; }
             public bool IsProcessed { get; set; }
+            public ProductInfo ProductData { get; set; }
         }
 
         public class ReaderStatus
@@ -109,7 +111,7 @@ namespace RFIDReaderAPI.Services
                     try
                     {
                         // Obtener información del producto
-                        var productData = await _productService.GetProductDataAsync(pallet.Key);
+                        var productData = palletInfo.ProductData;
 
                         // Actualizar campos específicos para tarima sin operador
                         productData.Operator = "Indefinido";
@@ -125,7 +127,7 @@ namespace RFIDReaderAPI.Services
 
                         palletInfo.IsProcessed = true;
 
-                        // Notificar con toda la información del producto
+                        // Ya no necesitamos verificar ShouldEmit aquí porque ya lo hicimos arriba
                         await hubContext.Clients.All.SendAsync("NewPallet", new
                         {
                             Product = productData,
@@ -300,20 +302,23 @@ namespace RFIDReaderAPI.Services
             }
         }
 
+        //helper pa mandar alv digital
+        private static bool ShouldEmit(ProductInfo p) =>
+        !string.Equals(p.TipoProducto, "Digital", StringComparison.OrdinalIgnoreCase);
+
+
         private async void OnTagsReported(ImpinjReader sender, TagReport report)
         {
             foreach (Tag tag in report.Tags)
             {
                 string epc = tag.Epc.ToHexString();
-                double rssiAvg = tag.PeakRssiInDbm; // Usar el valor correcto del RSSI promedio si está disponible
+                double rssiAvg = tag.PeakRssiInDbm;
 
-                // Umbral de RSSI Avg para filtrar etiquetas que realmente están pasando bajo la antena
+                // Tu código de filtrado de RSSI y cooldown se mantiene igual...
                 if (rssiAvg < -60)
                 {
-                    continue; // Ignorar EPCs con señal baja (lejos de la antena)
+                    continue;
                 }
-
-                // Verificar si la etiqueta está en período de cooldown
                 if (!ShouldProcessTag(epc))
                 {
                     continue;
@@ -321,35 +326,34 @@ namespace RFIDReaderAPI.Services
 
                 try
                 {
-                    if (epc.Length == 16) // Tarima
+                    if (epc.Length == 16) // Es una Tarima
                     {
-                        if (!pendingPallets.ContainsKey(epc))
+                        // Si la tarima ya está pendiente o procesada, la ignoramos.
+                        if (pendingPallets.ContainsKey(epc))
                         {
-                            var palletInfo = new PalletInfo
-                            {
-                                DetectedTime = DateTime.Now,
-                                Rssi = rssiAvg, // Guardar el RSSI Avg
-                                AntennaPort = tag.AntennaPortNumber,
-                                IsProcessed = false
-                            };
-
-                            pendingPallets.TryAdd(epc, palletInfo);
-
-                            // Opcionalmente, podrías pre-cargar los datos del producto aquí
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await _productService.GetProductDataAsync(epc);
-                                }
-                                catch
-                                {
-                                    // Ignorar errores en la pre-carga
-                                }
-                            });
+                            continue;
                         }
+
+                        // 1. OBTENER DATOS Y VERIFICAR (SOLO PARA TARIMAS)
+                        var productData = await _productService.GetProductDataAsync(epc);
+                        if (!ShouldEmit(productData))
+                        {
+                            continue; // Descarta producto "Digital" y sigue con el próximo tag
+                        }
+
+                        // 2. AGREGAR A PENDIENTES (SOLO SI NO ES DIGITAL)
+                        var palletInfo = new PalletInfo
+                        {
+                            DetectedTime = DateTime.Now,
+                            Rssi = rssiAvg,
+                            AntennaPort = tag.AntennaPortNumber,
+                            IsProcessed = false,
+                            ProductData = productData // Guardamos los datos que ya obtuvimos
+                        };
+
+                        pendingPallets.TryAdd(epc, palletInfo);
                     }
-                    else if (epc.Length == 12) // Operador
+                    else if (epc.Length == 12) // Es un Operador
                     {
                         var palletsToAssociate = pendingPallets
                             .Where(p => !p.Value.IsProcessed &&
@@ -360,15 +364,16 @@ namespace RFIDReaderAPI.Services
                         {
                             try
                             {
-                                var productTask = _productService.GetProductDataAsync(palletPair.Key);
-                                var operatorTask = _productService.GetOperatorInfoAsync(epc);
+                                // CORRECCIÓN: Usa directamente los datos guardados en PalletInfo.
+                                // No necesitas redeclarar la variable.
+                                ProductInfo productDataFromPallet = palletPair.Value.ProductData;
+                                var operatorInfo = await _productService.GetOperatorInfoAsync(epc);
 
-                                await Task.WhenAll(productTask, operatorTask);
+                                // LIMPIEZA: Las siguientes líneas ya no son necesarias.
+                                // var productTask = _productService.GetProductDataAsync(palletPair.Key);
+                                // await Task.WhenAll(productTask, operatorTask);
 
-                                var productData = await productTask;
-                                var operatorInfo = await operatorTask;
-
-                                productData.Operator = operatorInfo?.NombreOperador ?? "Indefinido";
+                                productDataFromPallet.Operator = operatorInfo?.NombreOperador ?? "Indefinido";
 
                                 var updateTasks = new List<Task>
                         {
@@ -384,7 +389,7 @@ namespace RFIDReaderAPI.Services
 
                                 await hubContext.Clients.All.SendAsync("NewAssociation", new
                                 {
-                                    Product = productData,
+                                    Product = productDataFromPallet, // Usamos la variable con el nuevo nombre
                                     OperatorInfo = operatorInfo,
                                     Rssi = palletPair.Value.Rssi,
                                     AntennaPort = palletPair.Value.AntennaPort,
@@ -477,6 +482,42 @@ namespace RFIDReaderAPI.Services
             }
         }
 
+        
+        public async Task ProcessSingleTagForTestingAsync(string epc)
+        {
+            // Esta es una versión simplificada de la lógica de OnTagsReported
+            // para probar el flujo de un solo tag.
+            if (epc.Length == 16) // Es una Tarima
+            {
+                try
+                {
+                    if (pendingPallets.ContainsKey(epc)) return;
+
+                    var productData = await _productService.GetProductDataAsync(epc);
+                    if (!ShouldEmit(productData))
+                    {
+                        // Si es digital, la ejecución termina aquí, que es lo que queremos probar.
+                        Console.WriteLine($"TEST: Producto digital {epc} descartado correctamente.");
+                        return;
+                    }
+
+                    var palletInfo = new PalletInfo
+                    {
+                        DetectedTime = DateTime.Now,
+                        Rssi = -45.0, // Valor de prueba
+                        AntennaPort = 99, // Puerto de prueba
+                        IsProcessed = false,
+                        ProductData = productData
+                    };
+                    pendingPallets.TryAdd(epc, palletInfo);
+                    Console.WriteLine($"TEST: Producto físico {epc} añadido a pendientes.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"TEST ERROR: {ex.Message}");
+                }
+            }
+        }
         public ReaderStatus GetStatus()
         {
             if (!isConnected)

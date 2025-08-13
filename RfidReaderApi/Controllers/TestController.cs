@@ -14,13 +14,34 @@ public class TestController : ControllerBase
     private readonly IHubContext<ReaderHub> _hubContext;
     private readonly INotificationService _notificationService;
     private readonly IProductDataService _productDataService;
+    private readonly RFIDReaderService _rfidReaderService;
 
 
-    public TestController(IHubContext<ReaderHub> hubContext, INotificationService notificationService, IProductDataService productDataService)
+    public TestController(
+     IHubContext<ReaderHub> hubContext,
+     INotificationService notificationService,
+     IProductDataService productDataService,
+     RFIDReaderService rfidReaderService) // <--- Añade esto
     {
         _hubContext = hubContext;
         _notificationService = notificationService;
-        _productDataService = productDataService; // Asignar la instancia inyectada
+        _productDataService = productDataService;
+        _rfidReaderService = rfidReaderService; // <--- Y esto
+    }
+
+    // Ahora, crea este nuevo endpoint
+    [HttpPost("simulate-scan/{epc}")]
+    public async Task<IActionResult> SimulateScan(string epc)
+    {
+        if (string.IsNullOrEmpty(epc))
+        {
+            return BadRequest("El EPC no puede ser nulo.");
+        }
+
+        // Aquí llamamos al "cerebro" para que ejecute la lógica real
+        await _rfidReaderService.ProcessSingleTagForTestingAsync(epc);
+
+        return Ok(new { status = $"Simulación de escaneo para {epc} procesada." });
     }
 
     [HttpPost("send-test-message")]

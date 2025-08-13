@@ -35,7 +35,10 @@ builder.Services.AddCors(options =>
         builder
             .WithOrigins(
                 "http://localhost:3001",
-                "http://172.16.10.31:90"
+                "http://172.16.10.31:90",
+                "http://172.16.10.31:92",
+                "http://172.16.10.31:105"
+
             // Agrega aquí todos los dominios que necesites
             )
             .AllowAnyHeader()
